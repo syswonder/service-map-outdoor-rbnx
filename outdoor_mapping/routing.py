@@ -1,0 +1,130 @@
+"""Shortest paths on measured polylines, including endpoints inside an edge."""
+
+import heapq
+import math
+
+from .track import distance, projection
+
+
+def validate_point(value):
+    if not isinstance(value, dict) or not all(
+        isinstance(value.get(k), (int, float))
+        and not isinstance(value[k], bool)
+        and math.isfinite(value[k])
+        for k in ("x", "y")
+    ):
+        raise ValueError("A map point requires finite x and y in meters")
+    return {k: float(value[k]) for k in ("x", "y")}
+
+
+def snap(network, point, blocked=()):
+    point = validate_point(point)
+    candidates = [
+        {**projection(point, r["points"]), "road_id": r["id"]}
+        for r in network["roads"]
+        if r["id"] not in blocked
+    ]
+    if not candidates:
+        raise ValueError("No open measured road")
+    return min(candidates, key=lambda s: s["distance_m"])
+
+
+def plan_route(network, start, goal, blocked=()):
+    unknown = set(blocked) - {r["id"] for r in network["roads"]}
+    if unknown:
+        raise ValueError("Unknown road IDs: " + ", ".join(sorted(unknown)))
+    # Never silently project a target from a closed road onto a different road.
+    a, b = snap(network, start), snap(network, goal)
+
+    def open_endpoint(original, point):
+        if original["road_id"] not in blocked:
+            return original
+        alternative = snap(network, point, blocked)
+        if distance(original["point"], alternative["point"]) > 1e-6:
+            raise ValueError("An endpoint lies on a closed road")
+        return alternative
+
+    if a["road_id"] in blocked:
+        # Arrival accepts a small neighborhood, not an exact graph vertex. A robot
+        # already inside a shared junction can enter an open outgoing road.
+        closed = next(road for road in network["roads"] if road["id"] == a["road_id"])
+        junctions = [
+            node
+            for node in network["nodes"]
+            if node["id"] in (closed["from"], closed["to"])
+            and distance(start, node) <= 0.5
+            and any(
+                road["id"] not in blocked and node["id"] in (road["from"], road["to"])
+                for road in network["roads"]
+            )
+        ]
+        a = (
+            snap(
+                network, min(junctions, key=lambda node: distance(start, node)), blocked
+            )
+            if junctions
+            else open_endpoint(a, start)
+        )
+    b = open_endpoint(b, goal)
+    def key(road, offset):
+        if abs(offset) < 1e-8:
+            return ("node", road["from"])
+        if abs(offset-road["length_m"]) < 1e-8:
+            return ("node", road["to"])
+        return (road["id"], round(offset, 9))
+    graph, points = {}, {}
+    for road in network["roads"]:
+        if road["id"] in blocked:
+            continue
+        ordered, offset = [], 0.0
+        for i, p in enumerate(road["points"]):
+            if i:
+                offset += distance(road["points"][i - 1], p)
+            ordered.append((offset, p))
+        ordered.extend(
+            (s["offset_m"], s["point"]) for s in (a, b) if s["road_id"] == road["id"]
+        )
+        ordered.sort(key=lambda v: v[0])
+        for (s, p), (t, q) in zip(ordered, ordered[1:]):
+            x, y = key(road, s), key(road, t)
+            points[x], points[y] = p, q
+            graph.setdefault(x, [])
+            graph.setdefault(y, [])
+            if x != y:
+                length = distance(p, q)
+                graph[x].append((y, length, road["id"]))
+                graph[y].append((x, length, road["id"]))
+    by_id = {r["id"]: r for r in network["roads"]}
+    begin, end = key(by_id[a["road_id"]], a["offset_m"]), key(by_id[b["road_id"]], b["offset_m"])
+    queue, costs, previous = [(0.0, begin)], {begin: 0.0}, {}
+    while queue:
+        cost, current = heapq.heappop(queue)
+        if cost > costs.get(current, math.inf):
+            continue
+        if current == end:
+            path, edges = [points.get(end, b["point"])], []
+            while current != begin:
+                current, edge = previous[current]
+                path.append(points[current])
+                edges.append(edge)
+            path.reverse()
+            edges.reverse()
+            return {
+                "start": a["point"],
+                "goal": b["point"],
+                "start_road_id": a["road_id"],
+                "reference_path": path,
+                "segment_roads": edges,
+                "road_ids": list(dict.fromkeys(edges)),
+                "length_m": costs[end],
+                "blocked_road_ids": sorted(set(blocked)),
+            }
+        for nxt, length, edge in graph.get(current, []):
+            candidate = cost + length
+            if candidate < costs.get(nxt, math.inf):
+                costs[nxt] = candidate
+                previous[nxt] = (current, edge)
+                heapq.heappush(queue, (candidate, nxt))
+    raise ValueError("Destination is disconnected from the measured route")
+
+

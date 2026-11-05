@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "service-map-outdoor-rbnx"
+version = "0.1.0"
+description = "GNSS route mapping with recorded gait intervals for Robonix Scene."
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6"]
+
+[project.optional-dependencies]
+robonix = ["robonix-api", "grpcio-tools==1.76.0"]
+test = ["pytest>=7", "httpx"]
+
+[tool.setuptools.packages.find]
+include = ["outdoor_mapping*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

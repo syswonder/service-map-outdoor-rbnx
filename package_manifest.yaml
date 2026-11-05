@@ -1,0 +1,60 @@
+manifestVersion: 1
+package:
+  name: robonix.service.map.outdoor
+  version: 0.1.0
+  description: GNSS route mapping and gait recording for Scene.
+  license: MulanPSL-2.0
+  tags:
+  - service
+  - mapping
+  - gnss
+  - outdoor
+build: bash scripts/build.sh
+start: bash scripts/start.sh
+capabilities:
+- name: robonix/service/map/save_map
+  transport:
+  - grpc
+  - mcp
+- name: robonix/service/map/load_map
+  transport:
+  - grpc
+  - mcp
+- name: robonix/service/map/list_maps
+  transport:
+  - grpc
+  - mcp
+- name: robonix/service/map/delete_map
+  transport:
+  - grpc
+  - mcp
+- name: robonix/service/map/get_mode
+  transport:
+  - grpc
+  - mcp
+- name: robonix/service/map_outdoor/get_map
+  transport:
+  - grpc
+  - mcp
+- name: robonix/service/map_outdoor/capture
+  transport:
+  - grpc
+  - mcp
+- name: robonix/service/map_outdoor/status
+  transport:
+  - grpc
+  - mcp
+- name: robonix/service/map_outdoor/preview_merge
+  transport:
+  - grpc
+  - mcp
+- name: robonix/service/map_outdoor/apply_merge
+  transport:
+  - grpc
+  - mcp
+- name: robonix/service/map_outdoor/plan_route
+  transport:
+  - grpc
+  - mcp
+- name: robonix/service/map/lifecycle
+  transport: ros2

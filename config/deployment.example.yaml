@@ -1,0 +1,28 @@
+# Merge these entries into the existing robot deployment; do not boot a second GNSS driver.
+# Replace checkout paths, GNSS instance and the verified MotionInfo type/field before use.
+service:
+  - name: outdoor_mapping
+    url: /ABSOLUTE/PATH/service-map-outdoor-rbnx
+    config:
+      data_dir: /data/robonix/outdoor_mapping
+      gnss_provider_id: g70_gnss
+      gait:
+        topic: /MOTION_INFO
+        msg_type: drdds/msg/MotionInfo
+        field: data.gait_state.gait
+      lifecycle_topic: /robonix/outdoor_map/lifecycle
+      limits:
+        input_timeout_s: 2.0
+        join_radius_m: 2.0
+  - name: scene
+    url: /ABSOLUTE/PATH/robonix/system/scene
+    manifest: package_manifest.annotate-native.yaml
+    config:
+      perception:
+        profile: annotate
+      web_host: 127.0.0.1
+      web_port: 50107
+      web_viewer: "off"
+      map_providers:
+        outdoor: outdoor_mapping
+        # indoor: mapping  # Set only if this indoor service actually runs.
