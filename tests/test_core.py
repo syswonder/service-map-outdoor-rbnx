@@ -269,3 +269,12 @@ def test_cancel_keeps_raw_and_allows_new_recording(mapping,pause_first):
     mapping.capture({'action':'start'})
     assert mapping.recorder.session['session_id']!=sid
     mapping.capture({'action':'cancel'})
+
+
+def test_fixed_origin_preview_and_finished_geometry_agree(mapping):
+    mapping.config['origin_wgs84']=dict(latitude=29.999,longitude=119.999)
+    feed(mapping,0);mapping.capture({'action':'start','new_map':True})
+    for i in range(1,5):feed(mapping,i)
+    first=mapping.status()['live_track'][0]
+    mapping.capture({'action':'stop'})
+    assert mapping.draft['network']['roads'][0]['points'][0]==pytest.approx({k:first[k] for k in ('x','y')})

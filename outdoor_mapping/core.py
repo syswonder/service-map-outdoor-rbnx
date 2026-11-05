@@ -10,7 +10,8 @@ import uuid
 from . import network
 from .coordinates import enu
 from .recorder import Recorder, GAITS
-from .routing import plan_route, snap, validate_point
+from .routing import validate_point
+from .measured import plan
 from .storage import MapStore, identifier, write_json, read_events
 
 DEFAULTS = dict(input_timeout_s=2., join_radius_m=2., max_recording_bytes=64*1024*1024,
@@ -65,7 +66,7 @@ class Mapping:
                       if fix and self.recorder.fresh("fix", time.monotonic()) else None)
             result["position_valid"] = sample is not None
             result["position_grade"] = sample["grade"] if sample else "unknown"
-            origin = (self.current or self.draft or {}).get("origin_wgs84")
+            origin = (self.current or self.draft or {}).get("origin_wgs84") or self.config.get("origin_wgs84")
             if origin is None and self.recorder.points:
                 origin = {k: self.recorder.points[0][k] for k in ("latitude", "longitude")}
             result["origin_wgs84"] = origin
@@ -155,8 +156,6 @@ class Mapping:
         self.draft = dict(schema_version=1, example_data=bool(self.config.get("example_data", False)), map_type="outdoor", frame_id="map", units="meters",
                           map_id="", parent_map_id=self.current["map_id"] if self.current else None,
                           **built, recordings=list(dict.fromkeys((self.current or {}).get("recordings", [])+[sid])))
-        for key in ("legacy_bundle_sha256","background"):
-            if key in (self.current or {}):self.draft[key]=copy.deepcopy(self.current[key])
         write_json(self.store.recordings / sid / "processed.json", built)
         self.preview_merge({})
 
@@ -183,9 +182,6 @@ class Mapping:
             if self.draft is None:
                 raise ValueError("Finish a recording first")
             base = copy.deepcopy(self.current["network"]) if self.current else None
-            if base:
-                for road in base["roads"]:
-                    road.setdefault("width_m",self.current.get("road_widths_m",{}).get(road["id"],4.))
             value = network.preview(base,self.draft["network"],self.config["join_radius_m"])
             value.update(preview_id=uuid.uuid4().hex, base_version=(self.current or {}).get("version"),
                          draft_version=network.version(self.draft["network"]))
@@ -201,10 +197,7 @@ class Mapping:
                 raise ValueError("Loaded map changed since preview")
             result = network.apply(self.merge, payload.get("decisions", {}), payload.get("choices", {}))
             self.draft["network"] = result
-            from .weighted import planning_bundle
-            geometry = planning_bundle(self.draft)
-            self.draft.update(grid=geometry["grid"],road_widths_m=geometry["road_widths_m"])
-            content = {k:self.draft[k] for k in ("network","origin_wgs84","grid","road_widths_m")}
+            content = {k:self.draft[k] for k in ("network","origin_wgs84")}
             self.draft["version"] = hashlib.sha256(json.dumps(content,sort_keys=True,allow_nan=False).encode()).hexdigest()[:16]
             self.draft["merge_reviewed"] = True
             self.draft["merge_review"] = dict(preview_id=self.merge["preview_id"],
@@ -256,8 +249,7 @@ class Mapping:
             if start is None:
                 raise ValueError("Select a start or wait for a fresh GNSS position")
             start, goal = validate_point(start), validate_point(payload["goal"])
-            from .weighted import plan
-            result = plan(value,start,goal,payload.get("blocked_road_ids",[]),payload.get("road_offroad_cost",50))
+            result = plan(value,start,goal,payload.get("blocked_road_ids",[]))
             return dict(**result,map_id=value["map_id"],version=value["version"],
                         frame_id="map",origin_wgs84=value["origin_wgs84"],execution_enabled=False)
 

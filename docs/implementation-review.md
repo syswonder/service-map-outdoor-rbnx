@@ -46,3 +46,19 @@ Follow-up hardware check: both native builds and live lifecycle activation passe
 
 
 UI follow-up: map type is preserved by server-rendered sidebar links and editor frames. Shared Camera/Logs no longer reset the Outdoor tab; the indoor viewer links are hidden outdoors. The existing loopback viewer proxy is reused for the explicitly configured local camera viewer with a finite timeout and an operation allowlist. Capture cancellation closes the stream while preserving raw events and skips draft generation; the capture panel opens automatically when recording is active. Robot browser checks passed without starting another physical recording. Actual camera video remains unverified because its RTSP sources are not currently publishing usable images.
+
+## New-map navigation follow-up (2026-11-05)
+
+Separate review passes found and resolved: duplicate `guided_path` overriding stairs tracking (`no-silent-failure`), a shadowed regex import breaking bound-map validation (`reuse-first`), and same-config binding skipping activation after a partial failure (`no-silent-failure`). The final Nav2 run also exposed sparse controller paths and blank-map startup waiting for TF; stairs paths now interpolate the reference and Driver INIT waits for process availability while task/command health gates remain strict.
+
+The simplification pass removed the duplicate method/import and dead frozen-test rewrite. The remaining executor hooks serve the outdoor subclass; measured planning reuses the existing graph algorithm. No new security issue was found. Writing corrected the distinction between stop-speed thresholds and the required stopped duration.
+
+Core/Scene regression: 60 passed. Navigation suite: 40 passed (overlaps the core run). Actual Nav2 virtual traversal and failure tests passed in domain 188; actual Atlas/Driver/localization map binding passed in domain 189. No physical motion was commanded.
+
+## Legacy stack retirement review
+
+Removed legacy weighted-map planning, old map backgrounds and the navigation worker's unused web/map/planning/obstacle-injection branches. Scene's map-bound consumer now belongs to `outdoor_nav.scene`; deployment files belong to the existing robot repository's `outdoor/` directory. Runtime imports no old project or campus assets. Synthetic Scene tests construct a recorded road instead of loading an old bundle.
+
+Separate maintainability, correctness and security passes found stale configuration documentation and unbounded request journals. Updated the descriptions and limited the journal to 1024 records of at most 2 MiB while preserving existing IDs for retries. Private GNSS settings, credentials, recordings, generated code and environments are excluded from the robot repository.
+
+Retirement validation (2026-11-06): 84 core/Scene/gRPC checks passed with the old map and adapter directories moved aside. Actual Atlas/localization binding and isolated real Nav2 stairs traversal passed again. Writing corrected stale links to old demo and historical deployment instructions. The installed robot remains in check mode; physical movement was not exercised.

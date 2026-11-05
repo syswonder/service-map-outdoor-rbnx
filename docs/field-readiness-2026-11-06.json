@@ -1,0 +1,125 @@
+{
+  "checked_on": "2026-11-05",
+  "field_test_date": "2026-11-06",
+  "versions": {
+    "mapping": "ddb44de",
+    "navigation": "da52deb",
+    "robonix": "303c8f2c"
+  },
+  "tests": {
+    "mapping_scene_core_passed": 23,
+    "latest_navigation_core_passed_on_lynx": 39,
+    "scene_grpc_protocol_passed": 2,
+    "gait_relay_and_isolated_dds_passed": 11
+  },
+  "physical_motion_tested": false,
+  "reproductions": {
+    "unconfirmed_gap": {
+      "graph": "disconnected",
+      "weighted_length_m": 11.0,
+      "weighted_gaits": [
+        "flat",
+        "flat"
+      ]
+    },
+    "stairs_shortcut": {
+      "recorded_route_length_m": 46.0,
+      "weighted_length_m": 6.0,
+      "weighted_gaits": [
+        "flat",
+        "unknown",
+        "flat"
+      ]
+    },
+    "configured_origin_preview": {
+      "live_start": {
+        "x": 0.0,
+        "y": 0.0,
+        "segment": 0
+      },
+      "finished_start": {
+        "x": 96.4862802513572,
+        "y": 110.85244249575265
+      },
+      "shift_m": 146.9621253385293
+    },
+    "stairs_unconfirmed": {
+      "command": 12291,
+      "status": {
+        "automatic": true,
+        "target_code": 12291,
+        "actual_code": 12290,
+        "confirmed": false,
+        "feedback_fresh": true,
+        "attempts": 1,
+        "route_progress_m": 6.0,
+        "reason": "gait_not_confirmed_retrying"
+      }
+    },
+    "detour_progress": {
+      "actual_x": 8.0,
+      "lateral_offset_m": 2.0,
+      "reported_progress_m": 0.5
+    },
+    "new_origin_vs_legacy_scene": {
+      "ready": false,
+      "coordinate_reference": {
+        "frame_id": "map",
+        "axes": "east_north",
+        "origin_wgs84": {
+          "latitude": 30.001,
+          "longitude": 120.001
+        },
+        "map_offset_xy_m": [
+          0.0,
+          0.0
+        ],
+        "antenna_xy_m": [
+          0.0,
+          0.0
+        ],
+        "reference_point": "base_link"
+      },
+      "coordinate_reference_matches_map": false,
+      "not_ready_reasons": [
+        "map_coordinate_reference_mismatch"
+      ]
+    },
+    "capture_while_navigating": {
+      "http_status": 200,
+      "mapping_calls": [
+        [
+          "capture",
+          {
+            "action": "start",
+            "new_map": true
+          }
+        ]
+      ]
+    }
+  },
+  "follow_up": {
+    "date": "2026-11-05",
+    "uncommitted_changes": true,
+    "core_scene_tests_passed": 60,
+    "navigation_tests_passed": 40,
+    "test_suites_overlap": true,
+    "isolated_nav2_domain": 188,
+    "blank_map_startup_passed": true,
+    "confirmed_gait_stops_and_timeout_passed": true,
+    "stairs_avoidance_pause_restore_passed": true,
+    "atlas_localization_binding_domain": 189,
+    "beijing_hangzhou_binding_passed": true,
+    "live_scene_browser_passed": true,
+    "deployed_root": "/home/nvidia/robot-outdoor-rbnx",
+    "profile": "check",
+    "scene_port": 50108,
+    "old_scene_50107_stopped": true,
+    "loaded_map_id": null,
+    "gnss_quality_observed": 1,
+    "native_motion_enabled": false,
+    "recording_active": false,
+    "backup": "/home/nvidia/robot-outdoor-rbnx/backups/field-20261105-230127",
+    "physical_motion_tested": false
+  }
+}

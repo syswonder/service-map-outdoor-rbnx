@@ -30,7 +30,7 @@ export PYTHONPATH="$(rbnx path robonix-api):${PYTHONPATH:-}"
 
 ## 山猫部署
 
-山猫当前已部署版本及下楼操作见 [实机测试步骤](docs/field-test.md)；到北京等其他场地复用见 [换场地说明](docs/new-site.md)。
+山猫部署配置及操作见机器人仓库 `outdoor/README.md`，当前验证结果见 [测试前检查](docs/field-readiness-2026-11-06.md)；到北京等场地复用见 [换场地说明](docs/new-site.md)。
 
 先读 [部署步骤](docs/deployment.md)，将 [配置示例](config/deployment.example.yaml) 合入现有部署。复用已激活的 GNSS 原语，不能重新打开同一串口。没有步态能力时，显式订阅 `/MOTION_INFO`；消息类型和字段必须在山猫只读核对，示例不是硬件保证。
 
@@ -54,7 +54,7 @@ Scene 的轻量原生清单为 Robonix 中的 `system/scene/package_manifest.ann
 
 标准 `robonix/service/map` 提供保存、列表、加载、删除、模式和生命周期。室外 `robonix/service/map_outdoor` 提供 `get_map`、`capture`、`status`、`preview_merge`、`apply_merge`、`plan_route`，六个接口均支持 gRPC 和 MCP；请求为 `request_json`，响应为 `ok/detail/result_json`。
 
-完整数据和对接示例见 [导航交接](docs/navigation-handoff.md)。本轮没有实际导航按钮、自动切步态、卫星底图、空地点选或道路编辑器。
+完整数据和对接示例见 [导航交接](docs/navigation-handoff.md)。Scene 已接入规划、导航、取消和步态状态；执行由独立导航服务负责。卫星底图和道路编辑器尚未提供。
 
 ```bash
 uv pip install --python .venv/bin/python pytest
@@ -65,10 +65,10 @@ PYTHONPATH=. .venv/bin/python -m pytest -q tests
 
 ## 导航接入更新
 
-规划改为原校园版连续道路代价：中心为 0，线性增加到边缘的路外代价；路外仍可通行，起终点不再限制距道路 2 米，但仍检查地图范围、封路和明确禁区。plan_route 新增 road_offroad_cost（1..99，默认 50），精确保留点击目标。
+新采及补采地图沿已确认的双向路网规划，返回完整途径点和按行进方向排列的步态、质量区段。起终点须在道路 2 米内并贴路；不会跨过未确认连接，也不会用路外捷径跳过楼梯。超过 4096 个参考点时要求拆分任务。
 
-旧校园图沿用原有道路宽度。新采地图尚无宽度测量时使用原窄路演示宽度 4 米，并在结果中标为 unmeasured_demo_default_4m；不把它当作新测得的可通行宽度。原点可由部署 origin_wgs84 固定，新建和补采保持一致。
+所有地图均使用实测路网规划；已移除旧校园加权规划、道路宽度默认值和旧底图读取。运行不依赖旧 outdoorNav 工程或校园资源。
 
-步态区段按实际返回的加权参考线重新分段，不把中心线的旧里程区段套到另一条路线。路外区段保留 unknown，不猜步态；导入的旧校园图没有步态记录，gait_annotations_available=false 且 intervals=[]。导航端再按明确区段切换并确认真实反馈，本服务仍不发运动或步态指令。
+新图原点取录制中的首个有效 GNSS；补采沿用加载地图原点。Scene 加载已保存地图时，通过现有定位 Driver 更新地图 ID、版本和原点，定位状态匹配后才允许导航。部署不预载杭州图；导航传感器代价图随机器人滚动。
 
-部署可用 initial_map_id 加载已有不可变地图；这不表示 SLAM 重定位成功。旧图导入工具与底图位于独立 robot-outdoor-rbnx 部署，不需要运行旧 outdoorNav。
+导航先停稳，再请求步态，确认真实反馈成功后才放行；默认 10 秒失败退出并回显 Scene。所有楼梯区段及前后 1 米缓冲暂停局部避障，回到平地后恢复。到点容差仍为 3 米。这些行为已做隔离联调，真实上下楼梯须现场验收。

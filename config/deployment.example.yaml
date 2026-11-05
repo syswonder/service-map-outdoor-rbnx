@@ -21,9 +21,15 @@ service:
       perception:
         profile: annotate
       web_host: 127.0.0.1
-      web_port: 50107
+      web_port: 50108
       # camera_viewer_port: 8080  # Optional existing local four-camera viewer.
       web_viewer: "off"
       map_providers:
         outdoor: outdoor_mapping
         # indoor: mapping  # Set only if this indoor service actually runs.
+      # Scene's optional navigation consumer comes from the navigation package.
+      # Include navigation/localization contracts in Scene's generated bindings.
+      # outdoor_navigation:
+      #   run_dir: /data/robonix/scene_requests
+      #   localization_config_path: /data/robonix/localization/config.json
+      #   execution_enabled: false

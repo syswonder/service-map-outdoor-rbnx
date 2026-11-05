@@ -1,5 +1,7 @@
 # 山猫现场测试（2026-11-05）
 
+> 以下为早期双实例测试记录。当前统一部署及导航步骤以 [部署说明](deployment.md) 和 [最新风险与验证](field-readiness-2026-11-06.md) 为准；不要再启动旧 outdoor-map-check。Scene 已接导航，统一使用山猫 50108。
+
 建图和 Scene 已在山猫原生构建，并连接现有 Atlas、GNSS 和实际步态反馈。部署目录是 `/home/nvidia/outdoor-map-check`。本次没有启动导航执行或发运动指令。
 
 ## 电脑打开真实网页
