@@ -84,6 +84,9 @@ class Recorder:
         elif action == "resume" and state == "paused":
             self.segment += 1
             self.session["state"] = "recording"
+        elif action == "cancel":
+            self.session.update(state="interrupted", ended_at=time.time(),
+                                error="Recording cancelled by operator; raw data retained")
         elif action == "stop":
             self.session["state"] = "finished"
             self.session["ended_at"] = time.time()
@@ -92,7 +95,7 @@ class Recorder:
         self.stream.flush()
         os.fsync(self.stream.fileno())
         self._save_state()
-        if action == "stop":
+        if action in ("stop", "cancel"):
             self.stream.close()
             self.stream = None
         return self.status()

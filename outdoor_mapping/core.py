@@ -8,7 +8,7 @@ import uuid
 
 from . import network
 from .coordinates import enu
-from .recorder import Recorder
+from .recorder import Recorder, GAITS
 from .routing import plan_route, snap, validate_point
 from .storage import MapStore, identifier, write_json, read_events
 
@@ -55,6 +55,10 @@ class Mapping:
                           pose=None, position_reference="gnss_antenna", heading=None)
             result["gait_code"] = (self.recorder.latest.get("gait", {}).get("message", {}).get("code")
                                    if self.recorder.fresh("gait", time.monotonic()) else None)
+            result["gait"] = GAITS.get(result["gait_code"], "unknown")
+            telemetry = self.recorder.latest.get("rtk_status", {}).get("message", {})
+            result["receiver_quality"] = (telemetry.get("receiver_quality")
+                                          if self.recorder.fresh("rtk_status", time.monotonic()) else None)
             fix = self.recorder.latest.get("fix")
             sample = (self.recorder.sample(fix["message"], time.monotonic())
                       if fix and self.recorder.fresh("fix", time.monotonic()) else None)
@@ -102,7 +106,7 @@ class Mapping:
                         raise
                     self.current = None
                     self.generation += 1
-            elif action in ("pause", "resume", "stop"):
+            elif action in ("pause", "resume", "stop", "cancel"):
                 result = self.recorder.control(action)
                 if action == "stop":
                     self._build_recording()

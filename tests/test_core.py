@@ -215,3 +215,55 @@ def test_confirmed_branches_share_an_existing_junction():
     merged=apply(value,decisions,{})
     assert plan_route(merged,dict(x=0,y=5),dict(x=0,y=-5))['length_m']==pytest.approx(10)
     assert len({n['id'] for n in merged['nodes']})==len(merged['nodes'])
+
+
+@pytest.mark.parametrize('latitude,longitude', [(30.2241,120.2598),(39.9042,116.4074)])
+def test_new_site_uses_first_usable_fix_and_plans_both_directions(mapping,latitude,longitude):
+    from outdoor_mapping.coordinates import local_radii
+    import math
+    east_radius,_=local_radii(latitude)
+    def position(x,quality=4):
+        mapping.clock[0]+=1
+        mapping.observe('rtk_status',dict(receiver_quality=quality,fix_age_s=0.,measurement_age_s=0.),'status')
+        mapping.observe('gait',{'code':0x1001},'feedback')
+        mapping.observe('fix',dict(latitude=latitude,longitude=longitude+math.degrees(x/east_radius)),'fix')
+    position(-1,quality=1)
+    mapping.capture({'action':'start','new_map':True})
+    assert mapping.recorder.points==[]
+    for x in range(10):
+        position(x)
+    first=finish(mapping,'local-v1')
+    assert first['origin_wgs84']==dict(latitude=latitude,longitude=longitude)
+    road=first['network']['roads'][0]
+    assert road['points'][0]['x']==pytest.approx(0.)
+    assert road['length_m']==pytest.approx(9.,abs=.01)
+    payload=dict(map_id=first['map_id'],version=first['version'],start=road['points'][0],goal=road['points'][-1])
+    forward=mapping.plan_route(payload)
+    reverse=mapping.plan_route({**payload,'start':payload['goal'],'goal':payload['start']})
+    assert forward['length_m']==pytest.approx(reverse['length_m'])
+    position(5)
+    mapping.capture({'action':'start'})
+    position(6)
+    position(7)
+    mapping.capture({'action':'stop'})
+    assert mapping.draft['origin_wgs84']==first['origin_wgs84']
+
+
+@pytest.mark.parametrize('pause_first',[False,True])
+def test_cancel_keeps_raw_and_allows_new_recording(mapping,pause_first):
+    feed(mapping,0)
+    mapping.capture({'action':'start'})
+    feed(mapping,1)
+    sid=mapping.recorder.session['session_id']
+    raw=mapping.store.recordings/sid/'events.jsonl'
+    original=raw.read_bytes()
+    if pause_first:
+        mapping.capture({'action':'pause'})
+    result=mapping.capture({'action':'cancel'})
+    assert result['session']['state']=='interrupted'
+    assert mapping.recorder.stream is None
+    assert mapping.draft is None and mapping.merge is None
+    assert raw.read_bytes()==original
+    mapping.capture({'action':'start'})
+    assert mapping.recorder.session['session_id']!=sid
+    mapping.capture({'action':'cancel'})

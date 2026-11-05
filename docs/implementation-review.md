@@ -37,6 +37,12 @@ Scope: a new service (about 2,800 lines including extracted filtering, documenta
 
 ## Validation
 
-Both build scripts passed. Core and Scene tests: 63 passed in the ROS-compatible Python 3.10 environment. Complete synthetic Atlas/ROS/gRPC/Scene runs and Chromium checks passed. See `validation.md` for evidence, reproduction and remaining operator field acceptance.
+Both build scripts passed. Core and Scene tests: 65 passed in the ROS-compatible Python 3.10 environment. Complete synthetic Atlas/ROS/gRPC/Scene runs and Chromium checks passed. See `validation.md` for evidence, reproduction and remaining operator field acceptance.
 
 Dropped concern: localization loads should increment generation. `MapLifecycle.msg` explicitly prohibits that increment for stable localization loads; the implementation follows the contract.
+
+
+Follow-up hardware check: both native builds and live lifecycle activation passed on Lynx ARM64 using the existing Atlas/GNSS and actual gait feedback. Indoor quality 1 positions were recorded raw and excluded from mapping. New-map origin selection follows the user's first usable GNSS decision; Hangzhou and Beijing regression cases pass. Field walking and navigation execution remain pending.
+
+
+UI follow-up: map type is preserved by server-rendered sidebar links and editor frames. Shared Camera/Logs no longer reset the Outdoor tab; the indoor viewer links are hidden outdoors. The existing loopback viewer proxy is reused for the explicitly configured local camera viewer with a finite timeout and an operation allowlist. Capture cancellation closes the stream while preserving raw events and skips draft generation; the capture panel opens automatically when recording is active. Robot browser checks passed without starting another physical recording. Actual camera video remains unverified because its RTSP sources are not currently publishing usable images.

@@ -73,13 +73,17 @@ def main():
     if args.status:
         print(json.dumps(status(),ensure_ascii=False,indent=2))
         return
+    registrations = {}
     for provider in (map_provider,scene_provider):
-        if endpoint(provider,'robonix/lifecycle/driver'):
+        records = ATLAS.query(id=provider)
+        if records and records[0].state.name != 'TERMINATED':
             raise RuntimeError(f'{provider} is already registered; use the existing instance or stop it first')
+        registrations[provider] = records[0].registration_id if records else None
     run_dir=args.run_dir.resolve()
     run_dir.mkdir(parents=True,exist_ok=True)
     children=[]
     logs=[]
+    owners=[]
     stop=threading.Event()
     signal.signal(signal.SIGINT,lambda *_:stop.set())
     signal.signal(signal.SIGTERM,lambda *_:stop.set())
@@ -88,8 +92,13 @@ def main():
         log=(run_dir/(provider+'.log')).open('a',buffering=1)
         logs.append(log)
         env={**os.environ,'RBNX_INSTANCE_NAME':provider,'RBNX_PACKAGE_ROOT':str(root)}
+        owners.append(provider)
         children.append(subprocess.Popen(['bash',str(root/script)],cwd=root,env=env,
                                          stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT))
+        def registered():
+            records = ATLAS.query(id=provider)
+            return records and records[0].registration_id != registrations[provider]
+        wait_for(registered)
 
     try:
         launch(map_provider,ROOT,Path('scripts/start.sh'))
@@ -99,7 +108,10 @@ def main():
         driver(scene_provider,0,config['scene'])
         driver(scene_provider,1)
         # Indoor GNSS may have no fix; activation requires interfaces, not a valid position.
-        state=wait_for(lambda: (value if len(value.get('inputs',{}))==3 else None) if (value:=status()) else None,timeout=12)
+        def inputs_connected():
+            value = status()
+            return value if len(value.get('inputs',{})) == 3 else None
+        state=wait_for(inputs_connected,timeout=12)
         (run_dir/'startup-status.json').write_text(json.dumps(state,ensure_ascii=False,indent=2))
         print(json.dumps(dict(ok=True,atlas=os.environ.get('ROBONIX_ATLAS'),status=state),ensure_ascii=False),flush=True)
         print('Mapping and Scene are running; Ctrl-C stops only these two services.',flush=True)
@@ -107,8 +119,14 @@ def main():
             if any(child.poll() is not None for child in children):
                 raise RuntimeError(f'A service exited; inspect {run_dir}')
     finally:
-        for child in reversed(children):
+        for provider, child in reversed(list(zip(owners, children))):
             if child.poll() is None:
+                try:
+                    driver(provider,3)
+                except Exception as error:
+                    print(f'{provider}: lifecycle shutdown failed: {error}',file=sys.stderr)
+                if child.poll() is not None:
+                    continue
                 child.terminate()
                 try:
                     child.wait(timeout=6)
