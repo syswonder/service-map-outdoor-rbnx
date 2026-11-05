@@ -50,7 +50,9 @@ def test_record_filter_persist_reverse_and_quality(mapping):
     forward = mapping.plan_route(payload)
     reverse = mapping.plan_route({**payload, "start": end, "goal": begin})
     assert forward["low_accuracy"] and not forward["execution_enabled"]
-    assert forward["reference_path"] == list(reversed(reverse["reference_path"]))
+    assert len(forward["reference_path"]) == len(reverse["reference_path"])
+    for a,b in zip(forward["reference_path"],reversed(reverse["reference_path"])):
+        assert a == pytest.approx(b,abs=1e-9)
     assert [x["gait_code"] for x in forward["intervals"]] == list(reversed([x["gait_code"] for x in reverse["intervals"]]))
     assert mapping.store.load("campus-v1") == saved
     with pytest.raises(ValueError, match="immutable"):

@@ -1,5 +1,6 @@
 """Mapping operations shared by gRPC, MCP and the local example."""
 import copy
+import hashlib
 import json
 import math
 import threading
@@ -135,7 +136,7 @@ class Mapping:
     def _build_recording(self):
         sid = self.recorder.session["session_id"]
         built = network.build(self.recorder.points, sid,
-                              self.current["origin_wgs84"] if self.current else None)
+                              self.current["origin_wgs84"] if self.current else self.config.get("origin_wgs84"))
         events, warning = read_events(self.store.recordings / sid / "events.jsonl")
         associations = []
         for event in events:
@@ -154,6 +155,8 @@ class Mapping:
         self.draft = dict(schema_version=1, example_data=bool(self.config.get("example_data", False)), map_type="outdoor", frame_id="map", units="meters",
                           map_id="", parent_map_id=self.current["map_id"] if self.current else None,
                           **built, recordings=list(dict.fromkeys((self.current or {}).get("recordings", [])+[sid])))
+        for key in ("legacy_bundle_sha256","background"):
+            if key in (self.current or {}):self.draft[key]=copy.deepcopy(self.current[key])
         write_json(self.store.recordings / sid / "processed.json", built)
         self.preview_merge({})
 
@@ -179,8 +182,11 @@ class Mapping:
             self._idle()
             if self.draft is None:
                 raise ValueError("Finish a recording first")
-            value = network.preview(self.current["network"] if self.current else None,
-                                    self.draft["network"], self.config["join_radius_m"])
+            base = copy.deepcopy(self.current["network"]) if self.current else None
+            if base:
+                for road in base["roads"]:
+                    road.setdefault("width_m",self.current.get("road_widths_m",{}).get(road["id"],4.))
+            value = network.preview(base,self.draft["network"],self.config["join_radius_m"])
             value.update(preview_id=uuid.uuid4().hex, base_version=(self.current or {}).get("version"),
                          draft_version=network.version(self.draft["network"]))
             self.merge = value
@@ -195,7 +201,11 @@ class Mapping:
                 raise ValueError("Loaded map changed since preview")
             result = network.apply(self.merge, payload.get("decisions", {}), payload.get("choices", {}))
             self.draft["network"] = result
-            self.draft["version"] = network.version(result)
+            from .weighted import planning_bundle
+            geometry = planning_bundle(self.draft)
+            self.draft.update(grid=geometry["grid"],road_widths_m=geometry["road_widths_m"])
+            content = {k:self.draft[k] for k in ("network","origin_wgs84","grid","road_widths_m")}
+            self.draft["version"] = hashlib.sha256(json.dumps(content,sort_keys=True,allow_nan=False).encode()).hexdigest()[:16]
             self.draft["merge_reviewed"] = True
             self.draft["merge_review"] = dict(preview_id=self.merge["preview_id"],
                 base_version=self.merge["base_version"], decisions=copy.deepcopy(payload.get("decisions", {})),
@@ -246,22 +256,10 @@ class Mapping:
             if start is None:
                 raise ValueError("Select a start or wait for a fresh GNSS position")
             start, goal = validate_point(start), validate_point(payload["goal"])
-            for p in (start, goal):
-                if snap(value["network"], p)["distance_m"] > 2:
-                    raise ValueError("Select a point within 2 m of a measured road")
-            result = plan_route(value["network"], start, goal, payload.get("blocked_road_ids", []))
-            roads = {r["id"]: r for r in value["network"]["roads"]}
-            offset, intervals = 0., []
-            for a,b,rid in zip(result["reference_path"], result["reference_path"][1:], result["segment_roads"]):
-                length = math.hypot(b["x"]-a["x"], b["y"]-a["y"])
-                r = roads[rid]
-                intervals.append(dict(road_id=rid, start_m=offset, end_m=offset+length,
-                    gait=r["gait"], gait_code=r["gait_code"], grade=r["grade"],
-                    low_accuracy=r["low_accuracy"], sources=r["sources"]))
-                offset += length
-            return dict(**result, map_id=value["map_id"], version=value["version"],
-                        frame_id="map", origin_wgs84=value["origin_wgs84"], intervals=intervals,
-                        low_accuracy=any(i["low_accuracy"] for i in intervals), execution_enabled=False)
+            from .weighted import plan
+            result = plan(value,start,goal,payload.get("blocked_road_ids",[]),payload.get("road_offroad_cost",50))
+            return dict(**result,map_id=value["map_id"],version=value["version"],
+                        frame_id="map",origin_wgs84=value["origin_wgs84"],execution_enabled=False)
 
     def close(self):
         with self.lock:

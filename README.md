@@ -62,3 +62,13 @@ PYTHONPATH=. .venv/bin/python -m pytest -q tests
 ```
 
 实际运行结果及尚待实机操作的项目见 [验收记录](docs/validation.md)。原校园数据保持原样。
+
+## 导航接入更新
+
+规划改为原校园版连续道路代价：中心为 0，线性增加到边缘的路外代价；路外仍可通行，起终点不再限制距道路 2 米，但仍检查地图范围、封路和明确禁区。plan_route 新增 road_offroad_cost（1..99，默认 50），精确保留点击目标。
+
+旧校园图沿用原有道路宽度。新采地图尚无宽度测量时使用原窄路演示宽度 4 米，并在结果中标为 unmeasured_demo_default_4m；不把它当作新测得的可通行宽度。原点可由部署 origin_wgs84 固定，新建和补采保持一致。
+
+步态区段按实际返回的加权参考线重新分段，不把中心线的旧里程区段套到另一条路线。路外区段保留 unknown，不猜步态；导入的旧校园图没有步态记录，gait_annotations_available=false 且 intervals=[]。导航端再按明确区段切换并确认真实反馈，本服务仍不发运动或步态指令。
+
+部署可用 initial_map_id 加载已有不可变地图；这不表示 SLAM 重定位成功。旧图导入工具与底图位于独立 robot-outdoor-rbnx 部署，不需要运行旧 outdoorNav。

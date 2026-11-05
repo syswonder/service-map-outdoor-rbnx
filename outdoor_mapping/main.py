@@ -27,7 +27,9 @@ def init(config):
         if mapping:
             mapping.close()
         settings = dict(config)
-        mapping = Mapping(config.get("data_dir", "rbnx-build/data"), {**(config.get("limits") or {}), "example_data": config.get("example_data", False)})
+        mapping = Mapping(config.get("data_dir", "rbnx-build/data"), {**(config.get("limits") or {}), "example_data": config.get("example_data", False), "origin_wgs84":config.get("origin_wgs84")})
+        if config.get("initial_map_id"):
+            mapping.load_map(config["initial_map_id"])
         return Ok()
     except (OSError, ValueError) as error:
         return Err(str(error))
