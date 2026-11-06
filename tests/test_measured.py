@@ -27,7 +27,40 @@ def test_stairs_are_not_shortcut_and_reverse_keeps_interval_distances(tmp_path):
         plan(value,start,goal,['b'])
 
 
-def test_unconfirmed_gap_and_crossing_stay_disconnected():
-    value={"network":{"nodes":[],"roads":[road('a','a','b',(0,0),(5,0)),road('b','c','d',(6,0),(11,0))]}}
+def test_off_route_approach_retains_stairs_stations_and_map():
+    value={"network":{"nodes":[],"roads":[road('a','a','b',(0,0),(0,20)),
+        road('b','b','c',(0,20),(6,20),'stairs'),road('c','c','d',(6,20),(6,0))]}}
+    result=plan(value,dict(x=-3.,y=0.),dict(x=6.,y=0.),[])
+    assert result['length_m']==49.
+    assert result['reference_path'][:2]==[dict(x=-3.,y=0.),dict(x=0.,y=0.)]
+    assert result['approach']['requires_sensor_validation']
+    assert result['intervals'][0]['source_kind']=='sensor_approach'
+    assert result['intervals'][0]['sources']==[]
+    assert [(i['start_m'],i['end_m']) for i in result['intervals'] if i['gait']=='stairs']==[(23.,29.)]
+    assert len(value['network']['roads'])==3
+
+
+def test_approach_has_no_distance_limit_and_goal_still_requires_a_measured_road():
+    distance_m=1000.
+    value={"network":{"nodes":[],"roads":[road('a','a','b',(0,0),(0,20))]}}
+    result=plan(value,dict(x=-distance_m,y=0.),dict(x=0.,y=20.),[])
+    assert result['approach']['length_m']==distance_m
+    assert result['length_m']==distance_m+20.
+    assert result['intervals'][1]['start_m']==distance_m
+    with pytest.raises(ValueError,match='goal within 2 m'):
+        plan(value,dict(x=0.,y=0.),dict(x=4.,y=20.),[])
+    entry_goal=plan(value,dict(x=-3.,y=0.),dict(x=0.,y=0.),[])
+    assert entry_goal['length_m']==3. and len(entry_goal['intervals'])==1
+
+
+def test_approach_does_not_join_disconnected_roads_or_enter_stairs():
+    value={"network":{"nodes":[],"roads":[road('a','a','b',(0,0),(0,20)),
+        road('b','c','d',(6,0),(6,20))]}}
     with pytest.raises(ValueError,match='disconnected'):
-        plan(value,dict(x=0,y=0),dict(x=11,y=0),[])
+        plan(value,dict(x=-3.,y=0.),dict(x=6.,y=20.),[])
+    value['network']['roads']=[road('a','a','b',(0,0),(0,20),'stairs')]
+    with pytest.raises(ValueError,match='No open flat road'):
+        plan(value,dict(x=-3.,y=0.),dict(x=0.,y=20.),[])
+    value['network']['roads']=[road('a','a','b',(0,0),(0,2)),road('b','b','c',(0,2),(0,5),'stairs')]
+    with pytest.raises(ValueError,match='stairs boundary'):
+        plan(value,dict(x=-3.,y=1.5),dict(x=0.,y=5.),[])

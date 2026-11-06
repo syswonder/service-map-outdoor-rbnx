@@ -8,7 +8,11 @@ Scene 已把建图规划接入 `service-navigation-outdoor-rbnx` 的 `follow_ref
 
 采集位置是 GNSS 天线；当前导航部署采用零天线偏移、零地图偏移，按 `base_link` 使用，是现场演示取舍。真实安装偏差与楼梯定位误差仍需测量；不要宣称已校准到厘米。
 
-`network.roads` 保存实际步态 `gait/gait_code`、定位 `grade/low_accuracy`、采集 `sources`。共享端点决定连通；未确认的交叉和缺口不能穿越。新图规划沿路网返回完整途径点，起终点在道路 2 米内贴路。所有规划走确认路网；旧校园文件不参与当前运行。
+`network.roads` 保存实际步态 `gait/gait_code`、定位 `grade/low_accuracy`、采集 `sources`。共享端点决定连通；未确认的交叉和缺口不能穿越。终点在道路 2 米内贴路。起点离道路超过 2 米时，先接回最近的开放平地路段，不设起点到道路的距离上限。接回后仍沿确认路网规划，旧校园文件不参与运行。
+
+接回段不是采集道路，不写入地图。响应增加 `approach`（起点、入路点、长度、`requires_sensor_validation=true`），并把接回段放在 `reference_path` 开头。其区段标记 `source_kind=sensor_approach`、`sources=[]`、`grade=unknown`；`gait=flat/gait_code=12290` 是接回时的执行要求，并非测得的地形。原道路步态累计距离相应后移。接回段使用 NavFn/DWB 和实时雷达避障，不能关闭避障或直接执行预览直线；无法通行时停车报错。不能直接接入楼梯，也不能通过接回绕过路网内部的断路。
+
+`Select a goal within 2 m...` 是建图服务的贴路规则；`No traversable path in the sensor costmap` 是执行端 NavFn 无法在传感器代价图上规划当前短路段。后者可能涉及障碍、起终点处的代价或传感器/地图状态，需结合当时的代价图确认；增加接回段不能保证它消失。
 
 ## 接口
 
