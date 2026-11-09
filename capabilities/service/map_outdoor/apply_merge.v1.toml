@@ -1,0 +1,9 @@
+[contract]
+id = "robonix/service/map_outdoor/apply_merge"
+version = "1"
+kind = "service"
+idl = "outdoor_map/srv/ApplyMerge.srv"
+description = "Outdoor mapping apply_merge; never commands chassis motion."
+
+[mode]
+type = "rpc"

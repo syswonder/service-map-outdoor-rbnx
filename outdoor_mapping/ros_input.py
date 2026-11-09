@@ -22,6 +22,17 @@ class Inputs:
         self.channels.append(channel)
         return channel.endpoint
 
+    def gait_binding(self):
+        # Do not inspect, resolve or import any gait configuration for wheels.
+        if self.config.get("locomotion_mode", "legged") == "wheeled":
+            return {}, None
+        gait = self.config.get("gait", {})
+        topic = (self.endpoint(gait["contract"], gait.get("provider_id", ""))
+                 if gait.get("contract") else gait.get("topic"))
+        if not topic:
+            raise ValueError("Configure an actual gait capability or explicit external gait topic")
+        return gait, topic
+
     def start(self):
         import rclpy
         from rclpy.executors import SingleThreadedExecutor
@@ -32,11 +43,7 @@ class Inputs:
         try:
             fix = self.endpoint("robonix/primitive/gnss/fix", self.config.get("gnss_provider_id", ""))
             status = self.endpoint("robonix/primitive/gnss/rtk_status", self.config.get("gnss_provider_id", ""))
-            gait = self.config.get("gait", {})
-            gait_topic = (self.endpoint(gait["contract"], gait.get("provider_id", ""))
-                          if gait.get("contract") else gait.get("topic"))
-            if not gait_topic:
-                raise ValueError("Configure an actual gait capability or explicit external gait topic")
+            gait, gait_topic = self.gait_binding()
             self.context = rclpy.Context()
             rclpy.init(context=self.context)
             self.node = rclpy.create_node("outdoor_map_inputs", context=self.context)
@@ -45,6 +52,7 @@ class Inputs:
             self.executor.add_node(self.node)
             qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
 
+            wheeled = self.config.get("locomotion_mode", "legged") == "wheeled"
             def callback(kind, topic):
                 seen = False
                 def receive(msg):
@@ -64,10 +72,9 @@ class Inputs:
                             value = {"raw_message": raw, "error": str(error)}
                     elif kind == "gait":
                         try:
-                            code = raw
-                            for field in gait.get("field", "data.gait_state.gait").split("."):
-                                code = code[field]
-                            value = {"code": int(code), "raw_message": raw}
+                            from .locomotion import feedback_value
+                            code = feedback_value(raw, gait.get("field", "data.gait_state.gait"))
+                            value = {"code": code, "raw_message": raw}
                         except (ValueError, TypeError, KeyError) as error:
                             value = {"code": None, "raw_message": raw, "error": str(error)}
                     self.mapping.observe(kind, value, topic)
@@ -78,6 +85,8 @@ class Inputs:
                 ("rtk_status", status, "std_msgs/msg/String"),
                 ("gait", gait_topic, gait.get("msg_type", "drdds/msg/MotionInfo")),
             ):
+                if kind == "gait" and wheeled:
+                    continue
                 self.node.create_subscription(get_message(msg_type), topic, callback(kind, topic), qos)
             lifecycle_topic = self.config.get("lifecycle_topic", "/robonix/outdoor_map/lifecycle")
             publisher = self.node.create_publisher(MapLifecycle, lifecycle_topic,

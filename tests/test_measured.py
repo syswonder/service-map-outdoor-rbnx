@@ -64,3 +64,14 @@ def test_approach_does_not_join_disconnected_roads_or_enter_stairs():
     value['network']['roads']=[road('a','a','b',(0,0),(0,2)),road('b','b','c',(0,2),(0,5),'stairs')]
     with pytest.raises(ValueError,match='stairs boundary'):
         plan(value,dict(x=-3.,y=1.5),dict(x=0.,y=5.),[])
+
+
+@pytest.mark.parametrize('at_entry', [False, True])
+def test_custom_flat_code_is_preserved_for_approach(at_entry):
+    edge = road('a', 'a', 'b', (0,0), (0,20))
+    edge['gait_code'] = 7
+    value = {'locomotion_mode':'legged', 'gait_code_map':{'7':'flat'},
+             'network':{'nodes':[], 'roads':[edge]}}
+    result = plan(value, dict(x=-3.,y=0.), dict(x=0.,y=0. if at_entry else 20.), [])
+    assert result['intervals'][0]['gait_code'] == 7
+    assert result['intervals'][0]['requires_sensor_validation']

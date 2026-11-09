@@ -8,7 +8,7 @@ import uuid
 from .storage import write_json
 
 GRADES = {2: "dgps", 4: "fixed", 5: "float"}
-GAITS = {0x1001: "flat", 0x3002: "flat", 0x1003: "stairs", 0x3003: "stairs"}
+from .locomotion import profile, gait_label
 
 
 def clean_json(value):
@@ -24,6 +24,8 @@ def clean_json(value):
 class Recorder:
     def __init__(self, store, config):
         self.store, self.config = store, config
+        self.profile = profile(config.get("locomotion_mode", "legged"), config.get("gait_code_map"))
+        self.required_inputs = ("fix", "rtk_status") if config.get("locomotion_mode") == "wheeled" else ("fix", "rtk_status", "gait")
         self.latest = {}
         self.session = None
         self.stream = None
@@ -43,21 +45,22 @@ class Recorder:
             k: {"fresh": self.fresh(k, now),
                 "age_s": max(0, now-v["received"]), "source": v["source"]}
             for k, v in self.latest.items()},
-            "ready": all(self.fresh(k, now) for k in ("fix", "rtk_status", "gait")),
+            "ready": all(self.fresh(k, now) for k in self.required_inputs),
+            "locomotion_mode": self.config.get("locomotion_mode", "legged"),
             "point_count": len(self.points)}
 
     def start(self, parent_map_id, now=None):
         if self.stream is not None:
             raise ValueError("Finish the current recording first")
         if not self.status(now)["ready"]:
-            raise ValueError("Fresh GNSS position, RTK status and actual gait feedback are required")
+            raise ValueError("Fresh configured inputs are required")
         if len(list(self.store.recordings.iterdir())) >= self.config["max_recordings"]:
             raise ValueError("Recording limit reached; archive old recordings first")
         sid = uuid.uuid4().hex
         directory = self.store.recordings / sid
         directory.mkdir()
         self.session = dict(session_id=sid, state="recording", parent_map_id=parent_map_id,
-                            started_at=time.time(), error=None)
+                            started_at=time.time(), error=None, **self.profile)
         self.points, self.segment, self.bytes_written = [], 0, 0
         self.recorded_gait = None
         self.stream = (directory / "events.jsonl").open("a", encoding="utf-8")
@@ -66,6 +69,8 @@ class Recorder:
         for kind in ("rtk_status", "gait", "fix"):
             if self.stream is None:
                 raise ValueError("Recording resource limit reached while preserving initial messages")
+            if kind not in self.required_inputs:
+                continue
             item = self.latest[kind]
             self._append(kind, item["message"], item["received"], item["source"], initial=True)
         if self.stream is None:
@@ -103,6 +108,8 @@ class Recorder:
     def observe(self, kind, message, source, received=None):
         if kind not in ("fix", "rtk_status", "gait"):
             raise ValueError("Unknown input")
+        if kind == "gait" and "gait" not in self.required_inputs:
+            return
         received = time.monotonic() if received is None else received
         message = clean_json(message)
         self.latest[kind] = dict(message=message, received=received, source=source)
@@ -122,10 +129,10 @@ class Recorder:
         nav_status = message.get("status", {}).get("status", 0)
         if not valid_ages or quality not in GRADES or not coordinate_ok or nav_status < 0:
             return None
-        code = gait.get("code") if self.fresh("gait", received) else None
+        code = gait.get("code") if "gait" in self.required_inputs and self.fresh("gait", received) else None
         return dict(latitude=lat, longitude=lon, altitude=message.get("altitude"),
                     quality=quality, grade=GRADES[quality], gait_code=code,
-                    gait=GAITS.get(code, "unknown"), time_s=received,
+                    gait=gait_label(self.profile["gait_code_map"], code), time_s=received,
                     utc=str(received), segment=self.segment,
                     quality_association="latest_fresh_status")
 

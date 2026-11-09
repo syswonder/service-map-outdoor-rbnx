@@ -9,7 +9,8 @@ import uuid
 
 from . import network
 from .coordinates import enu
-from .recorder import Recorder, GAITS
+from .recorder import Recorder
+from .locomotion import profile, stored_profile, require_compatible, gait_label
 from .routing import validate_point
 from .measured import plan
 from .storage import MapStore, identifier, write_json, read_events
@@ -25,6 +26,7 @@ class Mapping:
             v = self.config[key]
             if isinstance(v, bool) or not isinstance(v, (float, int)) or not math.isfinite(v) or v <= 0:
                 raise ValueError(f"{key} must be a positive finite number")
+        self.config.update(profile(self.config.get("locomotion_mode", "legged"), self.config.get("gait_code_map")))
         self.store = MapStore(directory)
         self.store.recover_recordings()
         self.recorder = Recorder(self.store, self.config)
@@ -57,7 +59,7 @@ class Mapping:
                           pose=None, position_reference="gnss_antenna", heading=None)
             result["gait_code"] = (self.recorder.latest.get("gait", {}).get("message", {}).get("code")
                                    if self.recorder.fresh("gait", time.monotonic()) else None)
-            result["gait"] = GAITS.get(result["gait_code"], "unknown")
+            result["gait"] = gait_label(self.config["gait_code_map"], result["gait_code"])
             telemetry = self.recorder.latest.get("rtk_status", {}).get("message", {})
             result["receiver_quality"] = (telemetry.get("receiver_quality")
                                           if self.recorder.fresh("rtk_status", time.monotonic()) else None)
@@ -99,6 +101,8 @@ class Mapping:
                     raise ValueError("Save or discard the existing draft before recording again")
                 new_map = bool(payload.get("new_map", False))
                 self._idle()
+                if self.current and not new_map:
+                    require_compatible(self.current, self.config, "append recording")
                 result = self.recorder.start(self.current["map_id"] if self.current and not new_map else None)
                 if new_map:
                     try:
@@ -117,12 +121,23 @@ class Mapping:
                 sid = identifier(payload["session_id"])
                 folder = self.store.recordings / sid
                 session = json.loads((folder / "session.json").read_text())
+                if self.draft:
+                    raise ValueError("Save or discard the existing draft before recovery")
+                if "locomotion_mode" not in session:
+                    if "legacy_locomotion_mode" not in payload:
+                        raise ValueError("Legacy recording has no locomotion_mode; explicitly supply legacy_locomotion_mode after checking its source")
+                    session.update(profile(payload["legacy_locomotion_mode"], payload.get("legacy_gait_code_map")))
+                restored_profile = stored_profile(session)
+                parent = session.get("parent_map_id")
+                restored_parent = self.store.load(parent) if parent else None
+                if restored_parent:
+                    require_compatible(restored_parent, restored_profile, "recording recovery")
                 events, warning = read_events(folder / "events.jsonl")
                 self.recorder.points = [e["sample"] for e in events if e.get("sample")]
                 session["recovery_warning"] = warning
                 self.recorder.session = session
                 parent = session.get("parent_map_id")
-                self.current = self.store.load(parent) if parent else None
+                self.current = restored_parent
                 self._build_recording()
                 result = self.recorder.status()
             elif action == "discard":
@@ -153,7 +168,7 @@ class Mapping:
                                      sample_index=nearest["index"] if associated else None))
         built["report"].update(gait_events=associations, recovery_warning=warning,
                               unassociated_gait_events=sum(a["sample_index"] is None for a in associations))
-        self.draft = dict(schema_version=1, example_data=bool(self.config.get("example_data", False)), map_type="outdoor", frame_id="map", units="meters",
+        self.draft = dict(**stored_profile(self.recorder.session), schema_version=1, example_data=bool(self.config.get("example_data", False)), map_type="outdoor", frame_id="map", units="meters",
                           map_id="", parent_map_id=self.current["map_id"] if self.current else None,
                           **built, recordings=list(dict.fromkeys((self.current or {}).get("recordings", [])+[sid])))
         write_json(self.store.recordings / sid / "processed.json", built)
@@ -181,6 +196,8 @@ class Mapping:
             self._idle()
             if self.draft is None:
                 raise ValueError("Finish a recording first")
+            if self.current:
+                require_compatible(self.current, self.draft, "merge")
             base = copy.deepcopy(self.current["network"]) if self.current else None
             value = network.preview(base,self.draft["network"],self.config["join_radius_m"])
             value.update(preview_id=uuid.uuid4().hex, base_version=(self.current or {}).get("version"),
@@ -195,9 +212,11 @@ class Mapping:
                 raise ValueError("Merge preview changed; review it again")
             if (self.current or {}).get("version") != self.merge["base_version"]:
                 raise ValueError("Loaded map changed since preview")
+            if self.current:
+                require_compatible(self.current, self.draft, "merge")
             result = network.apply(self.merge, payload.get("decisions", {}), payload.get("choices", {}))
             self.draft["network"] = result
-            content = {k:self.draft[k] for k in ("network","origin_wgs84")}
+            content = {k:self.draft[k] for k in ("network","origin_wgs84","locomotion_mode","gait_code_map")}
             self.draft["version"] = hashlib.sha256(json.dumps(content,sort_keys=True,allow_nan=False).encode()).hexdigest()[:16]
             self.draft["merge_reviewed"] = True
             self.draft["merge_review"] = dict(preview_id=self.merge["preview_id"],
@@ -243,6 +262,7 @@ class Mapping:
     def plan_route(self, payload):
         with self.lock:
             value = self.get_map()
+            require_compatible(value, self.config, "route planning")
             if payload.get("version") != value["version"] or payload.get("map_id") != value["map_id"]:
                 raise ValueError("Map identity changed; refresh before planning")
             start = payload.get("start") or self.status()["pose"]
