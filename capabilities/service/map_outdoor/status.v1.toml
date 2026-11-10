@@ -1,0 +1,9 @@
+[contract]
+id = "robonix/service/map_outdoor/status"
+version = "1"
+kind = "service"
+idl = "outdoor_map/srv/Status.srv"
+description = "Outdoor mapping status; never commands chassis motion."
+
+[mode]
+type = "rpc"

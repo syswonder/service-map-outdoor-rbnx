@@ -33,26 +33,32 @@ capabilities:
   - grpc
   - mcp
 - name: robonix/service/map_outdoor/get_map
+  path: capabilities/service/map_outdoor/get_map.v1.toml
   transport:
   - grpc
   - mcp
 - name: robonix/service/map_outdoor/capture
+  path: capabilities/service/map_outdoor/capture.v1.toml
   transport:
   - grpc
   - mcp
 - name: robonix/service/map_outdoor/status
+  path: capabilities/service/map_outdoor/status.v1.toml
   transport:
   - grpc
   - mcp
 - name: robonix/service/map_outdoor/preview_merge
+  path: capabilities/service/map_outdoor/preview_merge.v1.toml
   transport:
   - grpc
   - mcp
 - name: robonix/service/map_outdoor/apply_merge
+  path: capabilities/service/map_outdoor/apply_merge.v1.toml
   transport:
   - grpc
   - mcp
 - name: robonix/service/map_outdoor/plan_route
+  path: capabilities/service/map_outdoor/plan_route.v1.toml
   transport:
   - grpc
   - mcp

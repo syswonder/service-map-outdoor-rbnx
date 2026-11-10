@@ -6,10 +6,16 @@ service:
     config:
       data_dir: /data/robonix/outdoor_mapping
       gnss_provider_id: g70_gnss
+      locomotion_mode: legged # Use wheeled for wheels; omit the entire gait block.
       gait:
         topic: /MOTION_INFO
         msg_type: drdds/msg/MotionInfo
         field: data.gait_state.gait
+        code_map: # Explicit legacy example; replace with the actual chassis codes.
+          "0x1001": flat
+          "0x3002": flat
+          "0x1003": stairs
+          "0x3003": stairs
       lifecycle_topic: /robonix/outdoor_map/lifecycle
       limits:
         input_timeout_s: 2.0

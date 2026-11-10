@@ -2,7 +2,9 @@
 set -euo pipefail
 PKG="${RBNX_PACKAGE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$PKG"
-PY="${OUTDOOR_MAP_PYTHON:-$PKG/.venv/bin/python}"
+DEFAULT_PY=/usr/bin/python3
+[[ ! -x "$PKG/.venv/bin/python" ]] || DEFAULT_PY="$PKG/.venv/bin/python"
+PY="${OUTDOOR_MAP_PYTHON:-$DEFAULT_PY}"
 set +u
 source "${ROS_SETUP:-/opt/ros/${ROS_DISTRO:-humble}/setup.bash}"
 if [[ -n "${GAIT_ROS_SETUP:-}" ]]; then source "$GAIT_ROS_SETUP"; fi

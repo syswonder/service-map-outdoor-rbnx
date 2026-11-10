@@ -46,14 +46,17 @@ def plan(value, start, goal, blocked):
         for interval in intervals:
             interval["start_m"] += length
             interval["end_m"] += length
+        approach_code = intervals[0]["gait_code"] if intervals else roads[entry["road_id"]].get("gait_code")
         intervals.insert(0, {"start_m": 0., "end_m": length, "road_id": None,
-            "gait": "flat", "gait_code": 0x3002, "grade": "unknown", "low_accuracy": False,
+            "gait": "flat", "gait_code": approach_code, "grade": "unknown", "low_accuracy": False,
             "sources": [], "source_kind": "sensor_approach", "requires_sensor_validation": True})
         route.update(start=approach_start, reference_path=[approach_start, *route["reference_path"]],
                      segment_roads=[None, *route["segment_roads"]], length_m=route["length_m"]+length)
     if len(route["reference_path"]) > 4096:
         raise ValueError("Reference exceeds 4096 points; split the route")
-    return {**route, "intervals": intervals, "approach": approach,
-            "gait_annotations_available": bool(intervals),
+    wheeled = value.get("locomotion_mode") == "wheeled"
+    return {**route, "approach": approach, "quality_intervals": intervals if wheeled else [],
+            "intervals": [] if wheeled else intervals,
+            "gait_annotations_available": bool(intervals) and not wheeled,
             "low_accuracy": any(i["low_accuracy"] for i in intervals),
             "planner": "measured_network", "planning_policy": {"mode": "measured_network"}}
