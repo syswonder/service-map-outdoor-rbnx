@@ -3,5 +3,8 @@ __pycache__/
 .venv/
 *.egg-info/
 rbnx-build/
-data/
+data/*
+# The bundled example map ships with the repository; runtime data stays ignored.
+!data/examples/
+!data/examples/**
 logs/

@@ -4,6 +4,10 @@
 
 通用底盘适配位于 `feat/configurable-locomotion-mapping` 分支。部署使用此版本时，请在 manifest 中选择该分支。
 
+## 内置示例地图
+
+仓库自带一张示例地图（`data/examples/example-campus/map.json`）。服务启动时，若数据目录里一张已保存地图都没有，会自动导入并加载它（带 `example_data` 标记，Scene 室外页面显示“示例”），方便新装部署直接演示；已有地图的部署不受影响。卫星底图仍由 Scene 按需拉取。
+
 ## 底盘反馈与地图兼容
 
 部署设置 `locomotion_mode: wheeled`。仅要求新鲜 GNSS/RTK 输入，不订阅步态，

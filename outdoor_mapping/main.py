@@ -1,6 +1,7 @@
 """Robonix lifecycle and generated gRPC/MCP capability bindings."""
 import json
 import os
+from pathlib import Path
 
 from robonix_api import Deferred, Err, Ok, Service
 import map_pb2
@@ -18,6 +19,22 @@ settings = {}
 active = False
 
 
+def seed_example_map(mapping):
+    """Copy the bundled example map into an empty data dir and load it.
+
+    Fresh installs otherwise open the Scene outdoor page with nothing to
+    view; seeding gives them a demo map without recording one first. An
+    existing data dir (any saved map) is left untouched.
+    """
+    if mapping.store.list():
+        return
+    source = Path(__file__).resolve().parent.parent / "data" / "examples" / "example-campus" / "map.json"
+    if not source.exists():
+        return
+    mapping.store.save(json.loads(source.read_text(encoding="utf-8")))
+    mapping.load_map("example-campus")
+
+
 @service.on_init
 def init(config):
     global mapping, settings
@@ -28,6 +45,7 @@ def init(config):
             mapping.close()
         settings = dict(config)
         mapping = Mapping(config.get("data_dir", "rbnx-build/data"), {**(config.get("limits") or {}), "example_data": config.get("example_data", False), "origin_wgs84":config.get("origin_wgs84"), "locomotion_mode": config.get("locomotion_mode", "legged"), "gait_code_map": (config.get("gait") or {}).get("code_map") if config.get("locomotion_mode", "legged") == "legged" else None})
+        seed_example_map(mapping)
         if config.get("initial_map_id"):
             mapping.load_map(config["initial_map_id"])
         return Ok()
