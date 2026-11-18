@@ -8,6 +8,7 @@ import time
 import uuid
 
 from . import network
+from .reference import reference, require_same
 from .coordinates import enu
 from .recorder import Recorder
 from .locomotion import profile, stored_profile, require_compatible, gait_label
@@ -27,6 +28,13 @@ class Mapping:
             if isinstance(v, bool) or not isinstance(v, (float, int)) or not math.isfinite(v) or v <= 0:
                 raise ValueError(f"{key} must be a positive finite number")
         self.config.update(profile(self.config.get("locomotion_mode", "legged"), self.config.get("gait_code_map")))
+        self.config['reference_point'] = reference(self.config)
+        if self.config['reference_point'] == 'base_link':
+            origin = self.config.get('origin_wgs84')
+            if (not isinstance(origin, dict) or set(origin) != {'latitude','longitude'}
+                    or any(type(v) not in (int,float) or not math.isfinite(v) for v in origin.values())
+                    or not -90 < origin['latitude'] < 90 or not -180 <= origin['longitude'] <= 180):
+                raise ValueError('base_link recording requires explicit origin_wgs84 shared with localization')
         self.store = MapStore(directory)
         self.store.recover_recordings()
         self.recorder = Recorder(self.store, self.config)
@@ -73,7 +81,7 @@ class Mapping:
                 origin = {k: self.recorder.points[0][k] for k in ("latitude", "longitude")}
             result["origin_wgs84"] = origin
             result["live_track"] = []
-            if origin and self.recorder.stream:
+            if origin and self.recorder.stream and self.config["reference_point"] != "base_link":
                 result["live_track"] = [dict(x=xy[0], y=xy[1], segment=p["segment"])
                     for p in self.recorder.points[-2000:]
                     for xy in [enu(p["latitude"], p["longitude"], origin)]]
@@ -82,6 +90,14 @@ class Mapping:
                     x, y = enu(sample["latitude"], sample["longitude"], origin)
                     result["pose"] = dict(x=x, y=y, age_s=time.monotonic()-fix["received"],
                                           reference="gnss_antenna", grade=sample["grade"])
+            if self.config['reference_point'] == 'base_link':
+                result.update(pose=None, position_reference='base_link', position_valid=False)
+                item = self.recorder.latest.get('localization')
+                if item and self.recorder.fresh('localization', time.monotonic()):
+                    body = self.recorder.body_sample(item['message'], time.monotonic())
+                    if body and (not self.current or self.current['origin_wgs84'] == body['origin_wgs84']):
+                        result.update(pose={k:body[k] for k in ('x','y','yaw')}, position_valid=True, position_grade=body['grade'])
+                result['live_track'] = [dict(x=p['x'],y=p['y'],segment=p['segment']) for p in self.recorder.points[-2000:]]
             return copy.deepcopy(result)
 
     def lifecycle(self):
@@ -103,6 +119,7 @@ class Mapping:
                 self._idle()
                 if self.current and not new_map:
                     require_compatible(self.current, self.config, "append recording")
+                    require_same(self.current, self.config)
                 result = self.recorder.start(self.current["map_id"] if self.current and not new_map else None)
                 if new_map:
                     try:
@@ -132,6 +149,7 @@ class Mapping:
                 restored_parent = self.store.load(parent) if parent else None
                 if restored_parent:
                     require_compatible(restored_parent, restored_profile, "recording recovery")
+                    require_same(restored_parent, session)
                 events, warning = read_events(folder / "events.jsonl")
                 self.recorder.points = [e["sample"] for e in events if e.get("sample")]
                 session["recovery_warning"] = warning
@@ -152,7 +170,7 @@ class Mapping:
     def _build_recording(self):
         sid = self.recorder.session["session_id"]
         built = network.build(self.recorder.points, sid,
-                              self.current["origin_wgs84"] if self.current else self.config.get("origin_wgs84"))
+                              self.current["origin_wgs84"] if self.current else self.recorder.session.get("origin_wgs84", self.config.get("origin_wgs84")))
         events, warning = read_events(self.store.recordings / sid / "events.jsonl")
         associations = []
         for event in events:
@@ -168,7 +186,7 @@ class Mapping:
                                      sample_index=nearest["index"] if associated else None))
         built["report"].update(gait_events=associations, recovery_warning=warning,
                               unassociated_gait_events=sum(a["sample_index"] is None for a in associations))
-        self.draft = dict(**stored_profile(self.recorder.session), schema_version=1, example_data=bool(self.config.get("example_data", False)), map_type="outdoor", frame_id="map", units="meters",
+        self.draft = dict(**stored_profile(self.recorder.session), reference_point=reference(self.recorder.session), schema_version=2, example_data=bool(self.config.get("example_data", False)), map_type="outdoor", frame_id="map", units="meters",
                           map_id="", parent_map_id=self.current["map_id"] if self.current else None,
                           **built, recordings=list(dict.fromkeys((self.current or {}).get("recordings", [])+[sid])))
         write_json(self.store.recordings / sid / "processed.json", built)
@@ -198,6 +216,7 @@ class Mapping:
                 raise ValueError("Finish a recording first")
             if self.current:
                 require_compatible(self.current, self.draft, "merge")
+                require_same(self.current, self.draft)
             base = copy.deepcopy(self.current["network"]) if self.current else None
             value = network.preview(base,self.draft["network"],self.config["join_radius_m"])
             value.update(preview_id=uuid.uuid4().hex, base_version=(self.current or {}).get("version"),
@@ -214,9 +233,10 @@ class Mapping:
                 raise ValueError("Loaded map changed since preview")
             if self.current:
                 require_compatible(self.current, self.draft, "merge")
+                require_same(self.current, self.draft)
             result = network.apply(self.merge, payload.get("decisions", {}), payload.get("choices", {}))
             self.draft["network"] = result
-            content = {k:self.draft[k] for k in ("network","origin_wgs84","locomotion_mode","gait_code_map")}
+            content = {k:self.draft[k] for k in ("network","origin_wgs84","locomotion_mode","gait_code_map","reference_point")}
             self.draft["version"] = hashlib.sha256(json.dumps(content,sort_keys=True,allow_nan=False).encode()).hexdigest()[:16]
             self.draft["merge_reviewed"] = True
             self.draft["merge_review"] = dict(preview_id=self.merge["preview_id"],
@@ -263,6 +283,7 @@ class Mapping:
         with self.lock:
             value = self.get_map()
             require_compatible(value, self.config, "route planning")
+            require_same(value, self.config)
             if payload.get("version") != value["version"] or payload.get("map_id") != value["map_id"]:
                 raise ValueError("Map identity changed; refresh before planning")
             start = payload.get("start") or self.status()["pose"]
@@ -271,7 +292,7 @@ class Mapping:
             start, goal = validate_point(start), validate_point(payload["goal"])
             result = plan(value,start,goal,payload.get("blocked_road_ids",[]))
             return dict(**result,map_id=value["map_id"],version=value["version"],
-                        frame_id="map",origin_wgs84=value["origin_wgs84"],execution_enabled=False)
+                        frame_id="map",origin_wgs84=value["origin_wgs84"],reference_point=reference(value),execution_enabled=False)
 
     def close(self):
         with self.lock:

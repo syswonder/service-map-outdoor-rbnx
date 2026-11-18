@@ -6,6 +6,7 @@ import time
 import uuid
 
 from .storage import write_json
+from .reference import reference, body_sample
 
 GRADES = {2: "dgps", 4: "fixed", 5: "float"}
 from .locomotion import profile, gait_label
@@ -26,6 +27,9 @@ class Recorder:
         self.store, self.config = store, config
         self.profile = profile(config.get("locomotion_mode", "legged"), config.get("gait_code_map"))
         self.required_inputs = ("fix", "rtk_status") if config.get("locomotion_mode") == "wheeled" else ("fix", "rtk_status", "gait")
+        self.reference_point = reference(config)
+        if self.reference_point == "base_link":
+            self.required_inputs += ("localization",)
         self.latest = {}
         self.session = None
         self.stream = None
@@ -34,6 +38,7 @@ class Recorder:
         self.bytes_written = 0
         self.last_sync = 0
         self.recorded_gait = None
+        self.last_localization_state = None
 
     def fresh(self, kind, now):
         value = self.latest.get(kind)
@@ -41,32 +46,41 @@ class Recorder:
 
     def status(self, now=None):
         now = time.monotonic() if now is None else now
+        block_reason = next((f'{role}_missing_or_stale' for role in self.required_inputs
+                             if not self.fresh(role, now)), None)
+        if block_reason is None and self.reference_point == 'base_link':
+            message = self.latest['localization']['message']
+            if self.body_sample(message, now) is None:
+                block_reason = message.get('capture_block_reason') or 'base_link_pose_unavailable'
         return {"session": self.session, "inputs": {
             k: {"fresh": self.fresh(k, now),
                 "age_s": max(0, now-v["received"]), "source": v["source"]}
             for k, v in self.latest.items()},
-            "ready": all(self.fresh(k, now) for k in self.required_inputs),
+            "ready": block_reason is None, "block_reason": block_reason,
             "locomotion_mode": self.config.get("locomotion_mode", "legged"),
             "point_count": len(self.points)}
 
     def start(self, parent_map_id, now=None):
         if self.stream is not None:
             raise ValueError("Finish the current recording first")
-        if not self.status(now)["ready"]:
-            raise ValueError("Fresh configured inputs are required")
+        status = self.status(now)
+        if not status["ready"]:
+            raise ValueError("Fresh configured inputs are required (" + status["block_reason"] + ")")
         if len(list(self.store.recordings.iterdir())) >= self.config["max_recordings"]:
             raise ValueError("Recording limit reached; archive old recordings first")
         sid = uuid.uuid4().hex
         directory = self.store.recordings / sid
         directory.mkdir()
         self.session = dict(session_id=sid, state="recording", parent_map_id=parent_map_id,
-                            started_at=time.time(), error=None, **self.profile)
+                            started_at=time.time(), error=None, reference_point=self.reference_point,
+                            origin_wgs84=self.config.get("origin_wgs84"), **self.profile)
         self.points, self.segment, self.bytes_written = [], 0, 0
         self.recorded_gait = None
+        self.last_localization_state = None
         self.stream = (directory / "events.jsonl").open("a", encoding="utf-8")
         self._save_state()
         # Seed the recording with the actual inputs already received.
-        for kind in ("rtk_status", "gait", "fix"):
+        for kind in ("rtk_status", "gait", "fix", "localization"):
             if self.stream is None:
                 raise ValueError("Recording resource limit reached while preserving initial messages")
             if kind not in self.required_inputs:
@@ -106,7 +120,7 @@ class Recorder:
         return self.status()
 
     def observe(self, kind, message, source, received=None):
-        if kind not in ("fix", "rtk_status", "gait"):
+        if kind not in ("fix", "rtk_status", "gait", "localization"):
             raise ValueError("Unknown input")
         if kind == "gait" and "gait" not in self.required_inputs:
             return
@@ -115,6 +129,14 @@ class Recorder:
         self.latest[kind] = dict(message=message, received=received, source=source)
         if self.stream is not None:
             self._append(kind, message, received, source)
+
+    def body_sample(self, message, received):
+        sample = body_sample(message, self.config['origin_wgs84'], self.config['input_timeout_s'])
+        if sample is None:
+            return None
+        code = self.latest.get('gait', {}).get('message', {}).get('code') if 'gait' in self.required_inputs and self.fresh('gait', received) else None
+        return dict(**sample, time_s=received, utc=str(received), segment=self.segment,
+                    gait_code=code, gait=gait_label(self.profile['gait_code_map'], code))
 
     def sample(self, message, received):
         status = self.latest.get("rtk_status", {}).get("message", {})
@@ -137,15 +159,34 @@ class Recorder:
                     quality_association="latest_fresh_status")
 
     def _append(self, kind, message, received, source, initial=False):
+        state = self.session["state"]
+        recording = state == "recording"
+        sample = None
+        if kind == "localization":
+            sample = self.body_sample(message, received) if recording else None
+            if sample is not None and self.points and sample["pose_stamp_s"] <= self.points[-1]["pose_stamp_s"]:
+                return
+            health = (state, sample is not None, message.get("grade"),
+                      message.get("capture_block_reason"), message.get("fault"), message.get("error"))
+            if sample is None and health == self.last_localization_state:
+                return
+            if (sample is not None and self.points
+                    and self.points[-1]["segment"] == self.segment
+                    and received - self.points[-1]["time_s"] > self.config["input_timeout_s"]):
+                self.segment += 1
+                sample["segment"] = self.segment
+            self.last_localization_state = health
+            message = {key: value for key, value in message.items() if key != "raw_message"}
         event = dict(kind=kind, message=message, source=source,
                      received_monotonic=received, recorded_at=time.time(),
-                     state=self.session["state"], initial=initial)
+                     state=state, initial=initial)
         if kind == "gait":
             code = message.get("code")
             event["gait_changed"] = initial or code != self.recorded_gait
             self.recorded_gait = code
-        if kind == "fix" and self.session["state"] == "recording":
-            sample = self.sample(message, received)
+        if kind == ('localization' if self.reference_point == 'base_link' else 'fix') and recording:
+            if kind == "fix":
+                sample = self.sample(message, received)
             if sample is not None and self.points and received <= self.points[-1]["time_s"]:
                 sample = None
                 event["rejection"] = "duplicate_or_out_of_order_time"
@@ -155,18 +196,23 @@ class Recorder:
                 event["sample"] = sample
             else:
                 self.segment += 1
-        line = json.dumps(event, ensure_ascii=False, allow_nan=False) + "\n"
-        if self.bytes_written + len(line.encode()) > self.config["max_recording_bytes"] or len(self.points) > self.config["max_points"]:
+        separators = (",", ":") if kind == "localization" else None
+        line = json.dumps(event, ensure_ascii=False, allow_nan=False, separators=separators) + "\n"
+        size = len(line.encode("utf-8"))
+        byte_limit = self.bytes_written + size > self.config["max_recording_bytes"]
+        if byte_limit or len(self.points) > self.config["max_points"]:
             if "sample" in event:
                 self.points.pop()
-            self.session.update(state="interrupted", error="Recording resource limit reached")
+            limit = "max_recording_bytes" if byte_limit else "max_points"
+            self.session.update(state="interrupted", ended_at=time.time(),
+                                error=f"Recording limit reached: {limit}")
             self._save_state()
             self.stream.close()
             self.stream = None
             return
         self.stream.write(line)
         self.stream.flush()
-        self.bytes_written += len(line.encode())
+        self.bytes_written += size
         if time.monotonic() - self.last_sync >= 1:
             os.fsync(self.stream.fileno())
             self.last_sync = time.monotonic()

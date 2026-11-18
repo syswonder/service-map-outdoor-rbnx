@@ -18,8 +18,18 @@ def point(value):
 def build(points, session_id, origin=None):
     if not points:
         raise ValueError("Recording has no usable GNSS position")
-    origin = origin or {k: points[0][k] for k in ("latitude", "longitude")}
-    metric = [{**p, **dict(zip(("x", "y"), enu(p["latitude"], p["longitude"], origin)))} for p in points]
+    from .reference import reference
+    kind = reference(points[0])
+    if any(reference(p) != kind for p in points):
+        raise ValueError('Mixed trajectory reference points')
+    if kind == 'base_link':
+        origin = origin or points[0]['origin_wgs84']
+        if any(p['origin_wgs84'] != origin for p in points):
+            raise ValueError('Localization origin changed during recording')
+        metric = [dict(p) for p in points]
+    else:
+        origin = origin or {k: points[0][k] for k in ('latitude', 'longitude')}
+        metric = [{**p, **dict(zip(('x', 'y'), enu(p['latitude'], p['longitude'], origin)))} for p in points]
     groups = []
     for p in metric:
         key = (p["segment"], p["quality"], p["gait_code"])

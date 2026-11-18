@@ -52,11 +52,14 @@ def plan(value, start, goal, blocked):
             "sources": [], "source_kind": "sensor_approach", "requires_sensor_validation": True})
         route.update(start=approach_start, reference_path=[approach_start, *route["reference_path"]],
                      segment_roads=[None, *route["segment_roads"]], length_m=route["length_m"]+length)
-    if len(route["reference_path"]) > 4096:
-        raise ValueError("Reference exceeds 4096 points; split the route")
+    if len(route["reference_path"]) > 65536:
+        raise ValueError("Reference exceeds 65536 points; split the route")
     wheeled = value.get("locomotion_mode") == "wheeled"
     return {**route, "approach": approach, "quality_intervals": intervals if wheeled else [],
             "intervals": [] if wheeled else intervals,
             "gait_annotations_available": bool(intervals) and not wheeled,
             "low_accuracy": any(i["low_accuracy"] for i in intervals),
-            "planner": "measured_network", "planning_policy": {"mode": "measured_network"}}
+            "planner": "measured_network", "planning_policy": {"mode": "measured_network",
+                "reference_role": "ordered_hint_pool", "tracking_required": False,
+                "hint_spacing_min_m": 6.0, "preserve_corners": True,
+                "intermediate_arrival_side_m": 3.0}}

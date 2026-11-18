@@ -1,6 +1,20 @@
 specVersion: 1
 description: Read-only GNSS and gait collection; no chassis commands.
 properties:
+  reference_point:
+    type: string
+    enum: [gnss_antenna, base_link]
+    default: gnss_antenna
+    description: Base-link recording requires paired localization feedback; antenna recordings retain their explicit reference.
+  localization_provider_id:
+    type: string
+    description: Localization status provider used for base-link recording.
+  origin_wgs84:
+    type: object
+    description: Explicit WGS84 origin shared with localization for base-link recording.
+    properties:
+      latitude: {type: number}
+      longitude: {type: number}
   locomotion_mode:
     type: string
     enum: [legged, wheeled]

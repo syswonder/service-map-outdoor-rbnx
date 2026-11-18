@@ -43,6 +43,8 @@ class Inputs:
         try:
             fix = self.endpoint("robonix/primitive/gnss/fix", self.config.get("gnss_provider_id", ""))
             status = self.endpoint("robonix/primitive/gnss/rtk_status", self.config.get("gnss_provider_id", ""))
+            localization = (self.endpoint('robonix/service/localization/status', self.config.get('localization_provider_id', ''))
+                            if self.config.get('reference_point') == 'base_link' else None)
             gait, gait_topic = self.gait_binding()
             self.context = rclpy.Context()
             rclpy.init(context=self.context)
@@ -62,12 +64,24 @@ class Inputs:
                         seen = True
                     raw = message_to_ordereddict(msg)
                     value = dict(raw)
-                    if kind == "rtk_status":
+                    if kind in ("rtk_status", "localization"):
                         try:
                             value = json.loads(raw["data"])
                             if not isinstance(value, dict):
                                 raise ValueError("RTK status must contain an object")
-                            value["raw_message"] = raw
+                            if kind == "rtk_status":
+                                value["raw_message"] = raw
+                            if kind == 'localization':
+                                import math
+                                stamp = value.get('status_stamp_s')
+                                age = self.node.get_clock().now().nanoseconds/1e9-stamp if type(stamp) in (int,float) else float('inf')
+                                if not math.isfinite(age) or age < -.1 or age > self.mapping.config['input_timeout_s']:
+                                    value['ready'] = False
+                                    value['estimate_valid'] = False
+                                    value['capture_ready'] = False
+                                    value['capture_block_reason'] = 'localization_status_stale'
+                                elif type(value.get('pose_age_s')) in (int,float):
+                                    value['pose_age_s'] += max(0.,age)
                         except (ValueError, KeyError) as error:
                             value = {"raw_message": raw, "error": str(error)}
                     elif kind == "gait":
@@ -81,11 +95,12 @@ class Inputs:
                 return receive
 
             for kind, topic, msg_type in (
+                ("localization", localization, "std_msgs/msg/String"),
                 ("fix", fix, "sensor_msgs/msg/NavSatFix"),
                 ("rtk_status", status, "std_msgs/msg/String"),
                 ("gait", gait_topic, gait.get("msg_type", "drdds/msg/MotionInfo")),
             ):
-                if kind == "gait" and wheeled:
+                if topic is None or (kind == "gait" and wheeled):
                     continue
                 self.node.create_subscription(get_message(msg_type), topic, callback(kind, topic), qos)
             lifecycle_topic = self.config.get("lifecycle_topic", "/robonix/outdoor_map/lifecycle")
